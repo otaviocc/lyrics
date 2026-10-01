@@ -16,7 +16,7 @@ use crate::provider::{ProviderKind, ProviderSpec};
 const DEFAULT_USER_AGENT: &str = concat!(
     "lyrics/",
     env!("CARGO_PKG_VERSION"),
-    " (+https://github.com/otaviocc/Lyrics)"
+    " (+https://github.com/otaviocc/lyrics)"
 );
 
 #[derive(Debug, Deserialize, Clone)]

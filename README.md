@@ -1,9 +1,9 @@
 # lyrics
 
-[![CI](https://img.shields.io/github/actions/workflow/status/otaviocc/Lyrics/ci.yml?branch=main)](https://github.com/otaviocc/Lyrics/actions/workflows/ci.yml)
-[![GitHub release](https://img.shields.io/github/v/release/otaviocc/Lyrics)](https://github.com/otaviocc/Lyrics/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/otaviocc/lyrics/ci.yml?branch=main)](https://github.com/otaviocc/lyrics/actions/workflows/ci.yml)
+[![GitHub release](https://img.shields.io/github/v/release/otaviocc/lyrics)](https://github.com/otaviocc/lyrics/releases/latest)
 [![crates.io](https://img.shields.io/crates/v/lyrics-sidecar.svg)](https://crates.io/crates/lyrics-sidecar)
-[![license](https://img.shields.io/crates/l/lyrics-sidecar.svg)](https://github.com/otaviocc/Lyrics/blob/main/LICENSE)
+[![license](https://img.shields.io/crates/l/lyrics-sidecar.svg)](https://github.com/otaviocc/lyrics/blob/main/LICENSE)
 [![homebrew](https://img.shields.io/badge/homebrew-lyrics-blue.svg)](https://github.com/otaviocc/homebrew-apps)
 
 Never search for lyrics again. Point `lyrics` at your music library and it drops a `.lrc` or
@@ -31,7 +31,7 @@ cargo install lyrics-sidecar
 ### From source
 
 ```sh
-git clone https://github.com/otaviocc/Lyrics.git
+git clone https://github.com/otaviocc/lyrics.git
 cd Lyrics
 make install
 ```

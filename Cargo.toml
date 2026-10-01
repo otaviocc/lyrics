@@ -4,7 +4,7 @@ version = "0.4.0"
 edition = "2024"
 rust-version = "1.89"
 description = "Fetch synced/plain lyrics from LRCLIB or lrcmux and write them as sidecar files next to your music."
-repository = "https://github.com/otaviocc/Lyrics"
+repository = "https://github.com/otaviocc/lyrics"
 license = "MIT"
 
 [lib]
