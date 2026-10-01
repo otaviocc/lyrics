@@ -42,6 +42,10 @@ pedantic = { level = "deny", priority = -1 }
 # and these lints only ask for rustdoc on one. Comments are against the house style (AGENTS.md).
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+# Clippy would have every `assert!(x.is_empty())` spelled `assert_eq!(x, [] as [T; 0])` so a
+# failure prints the contents. A type-ascribed empty slice costs more to read than the message
+# is worth; `is_empty()` says what it means.
+assert_is_empty = "allow"
 nursery = { level = "deny", priority = -1 }
 unwrap_used = "deny"
 expect_used = "deny"
