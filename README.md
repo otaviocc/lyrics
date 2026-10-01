@@ -118,11 +118,10 @@ display them, unlike every other command, which never prints lyric bodies to std
 
 ### Themes
 
-`tui` ships the same bundled TOML themes as [rewind](https://github.com/otaviocc/rewind) and
-[vademecum](https://github.com/otaviocc/vademecum): `stage` (the default), `ansi`,
-`catppuccin-latte`, `catppuccin-mocha`, `default-plus`, `gruvbox-dark`, `gruvbox-light`,
-`kanagawa-dragon`, `nord`, `solarized-dark`, `solarized-light`, `tokyo-night`,
-`tokyo-night-day`, and `vesper`.
+`tui` ships the same bundled TOML themes as my other terminal tools: `stage` (the default),
+`ansi`, `catppuccin-latte`, `catppuccin-mocha`, `default-plus`, `gruvbox-dark`,
+`gruvbox-light`, `kanagawa-dragon`, `nord`, `solarized-dark`, `solarized-light`,
+`tokyo-night`, `tokyo-night-day`, and `vesper`.
 
 ```sh
 lyrics tui --list-themes            # every built-in, plus any of your own
