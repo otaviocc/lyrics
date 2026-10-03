@@ -116,10 +116,10 @@ pub enum Command {
     )]
     Tui {
         #[arg(
-            required_unless_present_any = ["file", "list_themes"],
+            required_unless_present_any = ["file", "folder", "list_themes"],
             conflicts_with = "file",
             requires = "artist",
-            help = "Track name to look up (omit this with --file or --list-themes)"
+            help = "Track name to look up (omit this with --file, --folder, or --list-themes)"
         )]
         track: Option<String>,
 
@@ -131,6 +131,9 @@ pub enum Command {
 
         #[arg(long, conflicts_with_all = ["track", "artist", "album"], help = "Read lyrics from a local .lrc (or .txt-in-LRC-syntax) file instead of fetching them. Stays offline: no provider is queried")]
         file: Option<PathBuf>,
+
+        #[arg(long, conflicts_with_all = ["track", "artist", "album", "file"], help = "Browse the .lrc files in a directory (top level only) and pick one to follow. Stays offline: no provider is queried")]
+        folder: Option<PathBuf>,
 
         #[arg(
             long,

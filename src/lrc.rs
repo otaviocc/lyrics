@@ -6,7 +6,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use walkdir::WalkDir;
 
 const KNOWN_METADATA_KEYS: &[&str] = &[
@@ -382,6 +382,29 @@ fn is_lrc_file(path: &Path) -> bool {
     crate::meta::has_extension(path, &["lrc"])
 }
 
+pub fn synced_files(dir: &Path) -> Result<Vec<(PathBuf, Synced)>> {
+    let entries =
+        std::fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))?;
+    let mut paths: Vec<PathBuf> = entries
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && is_lrc_file(path))
+        .collect();
+    paths.sort();
+
+    Ok(paths
+        .into_iter()
+        .filter_map(|path| {
+            let contents = std::fs::read_to_string(&path).ok()?;
+            if crate::sidecar::is_instrumental(&contents) {
+                return None;
+            }
+            let synced = parse_synced(&contents).ok()?;
+            Some((path, synced))
+        })
+        .collect())
+}
+
 #[must_use]
 pub fn resolve_lrc_paths(paths: &[PathBuf]) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let mut files = BTreeSet::new();
@@ -659,5 +682,82 @@ mod tests {
     #[test]
     fn parse_synced_errors_on_empty_input() {
         assert!(parse_synced("").is_err());
+    }
+
+    fn folder(dir: &Path) {
+        std::fs::write(
+            dir.join("02 Second.lrc"),
+            "[ti:Second]\n[ar:A Band]\n[00:01.00]Hello\n[00:02.00]World\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("01 First.lrc"), "[00:01.00]Only line\n").unwrap();
+        std::fs::write(dir.join("03 Plain.txt"), "Hello\nWorld\n").unwrap();
+        std::fs::write(dir.join("04 Untimed.lrc"), "Hello\nWorld\n").unwrap();
+        std::fs::write(
+            dir.join("05 Quiet.lrc"),
+            crate::sidecar::INSTRUMENTAL_MARKER,
+        )
+        .unwrap();
+        std::fs::create_dir(dir.join("nested")).unwrap();
+        std::fs::write(dir.join("nested/06 Deep.lrc"), "[00:01.00]Buried\n").unwrap();
+    }
+
+    #[test]
+    fn synced_files_keeps_only_top_level_lrc_files_with_timed_lines() {
+        let tmp = tempfile::tempdir().unwrap();
+        folder(tmp.path());
+
+        let found = synced_files(tmp.path()).unwrap();
+        let names: Vec<String> = found
+            .iter()
+            .map(|(path, _)| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(
+            names,
+            vec!["01 First.lrc", "02 Second.lrc"],
+            "a .txt, an untimed .lrc, an instrumental marker and a nested file must all drop out"
+        );
+    }
+
+    #[test]
+    fn synced_files_carries_the_metadata_tags_through() {
+        let tmp = tempfile::tempdir().unwrap();
+        folder(tmp.path());
+
+        let found = synced_files(tmp.path()).unwrap();
+        let (_, second) = found.last().unwrap();
+
+        assert_eq!(second.title.as_deref(), Some("Second"));
+        assert_eq!(second.artist.as_deref(), Some("A Band"));
+        assert_eq!(second.lines.len(), 2);
+    }
+
+    #[test]
+    fn synced_files_sorts_by_name_so_an_album_stays_in_track_order() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("10 Last.lrc"), "[00:01.00]a\n").unwrap();
+        std::fs::write(tmp.path().join("02 Middle.lrc"), "[00:01.00]b\n").unwrap();
+        std::fs::write(tmp.path().join("01 First.lrc"), "[00:01.00]c\n").unwrap();
+
+        let found = synced_files(tmp.path()).unwrap();
+        let names: Vec<String> = found
+            .iter()
+            .map(|(path, _)| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(names, vec!["01 First.lrc", "02 Middle.lrc", "10 Last.lrc"]);
+    }
+
+    #[test]
+    fn synced_files_on_an_empty_directory_is_empty_not_an_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(synced_files(tmp.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn synced_files_on_a_missing_directory_is_an_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(synced_files(&tmp.path().join("nope")).is_err());
     }
 }

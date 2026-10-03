@@ -74,11 +74,16 @@ pub fn sidecar_state(audio_path: &Path) -> SidecarState {
 }
 
 #[must_use]
+pub fn is_instrumental(contents: &str) -> bool {
+    contents.trim() == INSTRUMENTAL_MARKER.trim()
+}
+
+#[must_use]
 pub fn sidecar_detail(audio_path: &Path) -> SidecarDetail {
     let lrc = lrc_path(audio_path);
     if lrc.exists() {
         if let Ok(contents) = fs::read_to_string(&lrc) {
-            if contents.trim() == INSTRUMENTAL_MARKER.trim() {
+            if is_instrumental(&contents) {
                 return SidecarDetail::Instrumental;
             }
             if contents.lines().any(is_timestamp_line) {
