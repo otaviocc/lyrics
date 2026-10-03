@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 
 use lyrics::cli::{Cli, Command, Options, SharedOptions};
@@ -249,6 +249,7 @@ fn run(cli: Cli) -> Result<bool> {
             artist,
             album,
             file,
+            folder,
             counter,
             theme,
             list_themes,
@@ -258,6 +259,7 @@ fn run(cli: Cli) -> Result<bool> {
             artist,
             album,
             file,
+            folder,
             counter,
             theme,
             list_themes,
@@ -271,6 +273,7 @@ struct TuiArgs {
     artist: Option<String>,
     album: Option<String>,
     file: Option<PathBuf>,
+    folder: Option<PathBuf>,
     counter: bool,
     theme: Option<String>,
     list_themes: bool,
@@ -292,28 +295,25 @@ fn run_tui(args: &TuiArgs) -> Result<bool> {
         eprintln!("lyrics: {warning}");
     }
 
-    let song = if let Some(path) = &args.file {
-        let contents = fs::read_to_string(path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        let lrc::Synced {
-            title,
-            artist,
-            lines,
-        } = lrc::parse_synced(&contents)?;
-        let title = title.unwrap_or_else(|| {
-            path.file_stem().map_or_else(
-                || path.display().to_string(),
-                |stem| stem.to_string_lossy().into_owned(),
-            )
-        });
-        Song {
-            title,
-            artist,
-            lines,
+    if let Some(dir) = &args.folder {
+        if !dir.is_dir() {
+            anyhow::bail!("{} is not a directory", dir.display());
         }
+        let songs = tui::songs_from_dir(dir)?;
+        let Some(app) = tui::app::App::with_library(songs, loaded.theme, args.counter) else {
+            anyhow::bail!("no synced lyrics in {}", dir.display());
+        };
+        tui::run_app(app)?;
+        return Ok(true);
+    }
+
+    let song = if let Some(path) = &args.file {
+        tui::song_from_lrc(path)?
     } else {
         let Some(track) = args.track.clone() else {
-            anyhow::bail!("a track name is required unless --file or --list-themes is given");
+            anyhow::bail!(
+                "a track name is required unless --file, --folder, or --list-themes is given"
+            );
         };
         let Some(artist) = args.artist.clone() else {
             anyhow::bail!("--artist is required alongside a track name");

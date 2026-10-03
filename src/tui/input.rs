@@ -20,6 +20,10 @@ pub enum Action {
     Restart,
     ReplayCountdown,
     ToggleHelp,
+    PickerUp,
+    PickerDown,
+    PickerSelect,
+    TogglePicker,
     Quit,
 }
 
@@ -28,6 +32,21 @@ pub fn action(key: &KeyEvent, mode: Mode) -> Option<Action> {
     if mode == Mode::Help {
         return match key.code {
             KeyCode::Char('?' | 'q') | KeyCode::Esc => Some(Action::ToggleHelp),
+            _ => None,
+        };
+    }
+
+    if mode == Mode::Picker {
+        return match key.code {
+            KeyCode::Up | KeyCode::Char('k') => Some(Action::PickerUp),
+            KeyCode::Down | KeyCode::Char('j') => Some(Action::PickerDown),
+            KeyCode::Enter => Some(Action::PickerSelect),
+            KeyCode::Tab => Some(Action::TogglePicker),
+            KeyCode::Char('?') => Some(Action::ToggleHelp),
+            KeyCode::Char('q') | KeyCode::Esc => Some(Action::Quit),
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Action::Quit)
+            }
             _ => None,
         };
     }
@@ -54,6 +73,7 @@ pub fn action(key: &KeyEvent, mode: Mode) -> Option<Action> {
         KeyCode::Char('0' | 'r') => Some(Action::Restart),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
         KeyCode::Char('c') => Some(Action::ReplayCountdown),
+        KeyCode::Tab => Some(Action::TogglePicker),
         KeyCode::Char('?') => Some(Action::ToggleHelp),
         KeyCode::Char('q') | KeyCode::Esc => Some(Action::Quit),
         _ => None,
@@ -225,5 +245,63 @@ mod tests {
     #[test]
     fn an_unbound_key_resolves_to_nothing() {
         assert_eq!(action(&key(KeyCode::Char('z')), Mode::Playing), None);
+    }
+
+    #[test]
+    fn picker_mode_moves_the_cursor_and_leaves_the_playback_keys_inert() {
+        assert_eq!(
+            action(&key(KeyCode::Up), Mode::Picker),
+            Some(Action::PickerUp)
+        );
+        assert_eq!(
+            action(&key(KeyCode::Char('k')), Mode::Picker),
+            Some(Action::PickerUp)
+        );
+        assert_eq!(
+            action(&key(KeyCode::Down), Mode::Picker),
+            Some(Action::PickerDown)
+        );
+        assert_eq!(
+            action(&key(KeyCode::Char('j')), Mode::Picker),
+            Some(Action::PickerDown)
+        );
+        assert_eq!(
+            action(&key(KeyCode::Enter), Mode::Picker),
+            Some(Action::PickerSelect)
+        );
+        assert_eq!(
+            action(&key(KeyCode::Tab), Mode::Picker),
+            Some(Action::TogglePicker)
+        );
+        assert_eq!(
+            action(&key(KeyCode::Char('?')), Mode::Picker),
+            Some(Action::ToggleHelp)
+        );
+
+        assert_eq!(action(&key(KeyCode::Char(' ')), Mode::Picker), None);
+        assert_eq!(action(&key(KeyCode::Left), Mode::Picker), None);
+        assert_eq!(action(&key(KeyCode::Char(',')), Mode::Picker), None);
+        assert_eq!(action(&key(KeyCode::Char('c')), Mode::Picker), None);
+    }
+
+    #[test]
+    fn the_list_can_be_left_from_inside_it() {
+        assert_eq!(
+            action(&key(KeyCode::Char('q')), Mode::Picker),
+            Some(Action::Quit)
+        );
+        assert_eq!(action(&key(KeyCode::Esc), Mode::Picker), Some(Action::Quit));
+        assert_eq!(
+            action(&ctrl(KeyCode::Char('c')), Mode::Picker),
+            Some(Action::Quit)
+        );
+    }
+
+    #[test]
+    fn tab_reaches_the_list_from_playback() {
+        assert_eq!(
+            action(&key(KeyCode::Tab), Mode::Playing),
+            Some(Action::TogglePicker)
+        );
     }
 }

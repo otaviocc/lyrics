@@ -81,12 +81,20 @@ screen, earlier lines scroll up above it, and later lines wait below.
 ```sh
 lyrics tui "One" --artist "Metallica" --counter   # fetch, then 3, 2, 1, PLAY
 lyrics tui --file "~/Music/Metallica/...And Justice for All/04 One.lrc"
+lyrics tui --folder "~/Music/Metallica/...And Justice for All"
 ```
 
-Without `--file`, `tui` looks the track up the same way `show` does (`--artist` is required,
-`--album` optionally narrows the match) and needs synced lyrics — a plain-only or instrumental
-result is an error. With `--file`, it reads that `.lrc` straight from disk and never makes a
-network request.
+Without `--file` or `--folder`, `tui` looks the track up the same way `show` does (`--artist`
+is required, `--album` optionally narrows the match) and needs synced lyrics — a plain-only or
+instrumental result is an error. With `--file`, it reads that `.lrc` straight from disk and
+never makes a network request.
+
+`--folder` opens on a list of the synced `.lrc` files in that directory — its immediate
+children only, no recursion — and nothing else: a sidecar with no timed lines, an instrumental
+marker, and a `.txt` are all left out, so everything you can pick is playable. Move with
+`↑`/`↓`, press `Enter` to follow the song under the cursor, and press `Tab` at any time to come
+back to the list and switch to another without leaving the screen. The `▸` marks the one you
+are following. Like `--file`, it never makes a network request.
 
 The clock is yours to drive, not tied to anything external: it starts paused at `00:00`, and
 you press Space at the same moment you hit play in your music player. `--counter` shows a
@@ -110,6 +118,7 @@ starts it: playback resumes from the start of that line.
 | `Enter` | paused: start the current line now; playing: snap to the nearest line |
 | `0` / `r` | restart at `00:00`, paused |
 | `c` | replay the countdown |
+| `Tab` | open / close the song list (`--folder`) |
 | `?` | show every key |
 | `q` / `Esc` / `Ctrl-c` | quit |
 
@@ -211,9 +220,9 @@ Ebook (`lyrics ebook` only)
 
 Run `lyrics scan --help` or `lyrics track --help` for the full, always up-to-date list. The
 first four groups apply to `scan`, `track`, `show`, and `tui` (when it's fetching); `stats`,
-`lint`, and `ebook` are read-only and take no network or selection options, and neither does
-`tui --file`. `tui` additionally takes `--file`, `--counter`, `--theme`, and `--list-themes`;
-see [Following along](#following-along).
+`lint`, and `ebook` are read-only and take no network or selection options, and neither do
+`tui --file` and `tui --folder`. `tui` additionally takes `--file`, `--folder`, `--counter`,
+`--theme`, and `--list-themes`; see [Following along](#following-along).
 
 ## Configuration
 

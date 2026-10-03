@@ -9,6 +9,7 @@ use crate::lrc::SyncedLine;
 use crate::theme::Theme;
 use crate::tui::clock::{Clock, SignedDuration};
 use crate::tui::input::Action;
+use crate::tui::picker::Picker;
 
 pub const COUNTDOWN_STEP: Duration = Duration::from_secs(1);
 const SHORT_SEEK: Duration = Duration::from_secs(5);
@@ -30,6 +31,7 @@ pub enum Mode {
     Countdown { step: u8 },
     Playing,
     Help,
+    Picker,
 }
 
 pub struct App {
@@ -38,24 +40,54 @@ pub struct App {
     pub clock: Clock,
     pub mode: Mode,
     pub quit: bool,
+    picker: Option<Picker>,
+    opening: Mode,
+    help_return: Mode,
     notice: Option<(String, Instant)>,
 }
 
 impl App {
     #[must_use]
     pub const fn new(song: Song, theme: Theme, counter: bool) -> Self {
+        let mode = start_mode(counter);
         Self {
             song,
             theme,
             clock: Clock::new(),
-            mode: if counter {
-                Mode::Countdown { step: 0 }
-            } else {
-                Mode::Playing
-            },
+            mode,
             quit: false,
+            picker: None,
+            opening: mode,
+            help_return: mode,
             notice: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_library(songs: Vec<Song>, theme: Theme, counter: bool) -> Option<Self> {
+        let picker = Picker::new(songs);
+        let song = picker.current()?.clone();
+        Some(Self {
+            mode: Mode::Picker,
+            help_return: Mode::Picker,
+            picker: Some(picker),
+            ..Self::new(song, theme, counter)
+        })
+    }
+
+    #[must_use]
+    pub const fn picker(&self) -> Option<&Picker> {
+        self.picker.as_ref()
+    }
+
+    #[must_use]
+    pub const fn browsing(&self) -> Option<&Picker> {
+        let listing = match self.mode {
+            Mode::Picker => true,
+            Mode::Help => matches!(self.help_return, Mode::Picker),
+            _ => false,
+        };
+        if listing { self.picker.as_ref() } else { None }
     }
 
     #[must_use]
@@ -154,6 +186,31 @@ impl App {
         self.clock.play(at);
     }
 
+    fn play_selected(&mut self) {
+        let Some(song) = self.picker.as_mut().and_then(Picker::choose).cloned() else {
+            return;
+        };
+        self.song = song;
+        self.clock.restart();
+        self.mode = self.opening;
+    }
+
+    fn toggle_picker(&mut self) {
+        let Some(picker) = self.picker.as_mut() else {
+            return;
+        };
+        if self.mode != Mode::Picker {
+            picker.rewind();
+            self.mode = Mode::Picker;
+        } else if picker.chosen().is_some() {
+            self.mode = if self.clock.is_playing() {
+                Mode::Playing
+            } else {
+                self.opening
+            };
+        }
+    }
+
     pub fn apply(&mut self, action: Action, at: Instant) {
         match action {
             Action::TogglePlay => {
@@ -207,15 +264,36 @@ impl App {
                 self.clock.restart();
                 self.mode = Mode::Countdown { step: 0 };
             }
+            Action::PickerUp => {
+                if let Some(picker) = self.picker.as_mut() {
+                    picker.select_previous();
+                }
+            }
+            Action::PickerDown => {
+                if let Some(picker) = self.picker.as_mut() {
+                    picker.select_next();
+                }
+            }
+            Action::PickerSelect => self.play_selected(),
+            Action::TogglePicker => self.toggle_picker(),
             Action::ToggleHelp => {
-                self.mode = if self.mode == Mode::Help {
-                    Mode::Playing
+                if self.mode == Mode::Help {
+                    self.mode = self.help_return;
                 } else {
-                    Mode::Help
-                };
+                    self.help_return = self.mode;
+                    self.mode = Mode::Help;
+                }
             }
             Action::Quit => self.quit = true,
         }
+    }
+}
+
+const fn start_mode(counter: bool) -> Mode {
+    if counter {
+        Mode::Countdown { step: 0 }
+    } else {
+        Mode::Playing
     }
 }
 
@@ -564,5 +642,210 @@ mod tests {
         let mut app = App::new(song(), Theme::default(), false);
         app.apply(Action::Quit, t(0));
         assert!(app.quit);
+    }
+
+    fn library() -> Vec<Song> {
+        vec![
+            Song {
+                title: String::from("One"),
+                artist: None,
+                lines: vec![SyncedLine {
+                    at_ms: 1_000,
+                    text: String::from("a"),
+                }],
+            },
+            Song {
+                title: String::from("Two"),
+                artist: None,
+                lines: vec![SyncedLine {
+                    at_ms: 2_000,
+                    text: String::from("b"),
+                }],
+            },
+        ]
+    }
+
+    #[test]
+    fn a_library_opens_on_the_list_with_the_clock_untouched() {
+        let app = App::with_library(library(), Theme::default(), false).unwrap();
+
+        assert_eq!(app.mode, Mode::Picker);
+        assert_eq!(app.song.title, "One");
+        assert_eq!(app.clock.now(t(0)), Duration::ZERO);
+        assert!(!app.clock.is_playing());
+        assert_eq!(app.browsing().map(Picker::len), Some(2));
+    }
+
+    #[test]
+    fn an_empty_library_has_nothing_to_open() {
+        assert!(App::with_library(Vec::new(), Theme::default(), false).is_none());
+    }
+
+    #[test]
+    fn choosing_a_song_loads_it_and_starts_playback_from_zero() {
+        let mut app = App::with_library(library(), Theme::default(), false).unwrap();
+
+        app.apply(Action::PickerDown, t(0));
+        app.apply(Action::PickerSelect, t(0));
+
+        assert_eq!(app.mode, Mode::Playing);
+        assert_eq!(app.song.title, "Two");
+        assert_eq!(app.clock.now(t(5)), Duration::ZERO);
+        assert_eq!(app.picker().and_then(Picker::chosen), Some(1));
+    }
+
+    #[test]
+    fn choosing_a_song_runs_the_countdown_again_when_it_was_asked_for() {
+        let mut app = App::with_library(library(), Theme::default(), true).unwrap();
+
+        app.apply(Action::PickerSelect, t(0));
+
+        assert_eq!(app.mode, Mode::Countdown { step: 0 });
+    }
+
+    #[test]
+    fn the_list_cannot_be_closed_until_a_song_has_been_chosen() {
+        let mut app = App::with_library(library(), Theme::default(), false).unwrap();
+
+        app.apply(Action::TogglePicker, t(0));
+        assert_eq!(app.mode, Mode::Picker, "there is nothing to go back to yet");
+
+        app.apply(Action::PickerSelect, t(0));
+        app.apply(Action::TogglePicker, t(0));
+        assert_eq!(app.mode, Mode::Picker);
+
+        app.apply(Action::TogglePicker, t(0));
+        assert_eq!(app.mode, Mode::Playing);
+    }
+
+    #[test]
+    fn reopening_the_list_puts_the_cursor_back_on_the_song_being_followed() {
+        let mut app = App::with_library(library(), Theme::default(), false).unwrap();
+
+        app.apply(Action::PickerSelect, t(0));
+        app.apply(Action::TogglePicker, t(0));
+        app.apply(Action::PickerDown, t(0));
+        app.apply(Action::TogglePicker, t(0));
+        app.apply(Action::TogglePicker, t(0));
+
+        assert_eq!(app.picker().map(Picker::selected), Some(0));
+    }
+
+    #[test]
+    fn closing_the_list_leaves_the_clock_running() {
+        let mut app = App::with_library(library(), Theme::default(), false).unwrap();
+        app.apply(Action::PickerSelect, t(0));
+        app.apply(Action::TogglePlay, t(0));
+
+        app.apply(Action::TogglePicker, t(1));
+        app.apply(Action::TogglePicker, t(2));
+
+        assert!(app.clock.is_playing(), "browsing must not stop the clock");
+        assert_eq!(app.clock.now(t(3)), Duration::from_secs(3));
+    }
+
+    #[test]
+    fn the_picker_keys_do_nothing_without_a_library() {
+        let mut app = App::new(song(), Theme::default(), false);
+
+        app.apply(Action::TogglePicker, t(0));
+        app.apply(Action::PickerDown, t(0));
+        app.apply(Action::PickerSelect, t(0));
+
+        assert_eq!(app.mode, Mode::Playing);
+        assert_eq!(app.song.title, "Test");
+    }
+
+    #[test]
+    fn help_returns_to_the_list_it_was_opened_from() {
+        let mut app = App::with_library(library(), Theme::default(), false).unwrap();
+
+        app.apply(Action::ToggleHelp, t(0));
+        assert_eq!(app.mode, Mode::Help);
+
+        app.apply(Action::ToggleHelp, t(0));
+        assert_eq!(app.mode, Mode::Picker);
+    }
+
+    #[test]
+    fn help_resumes_a_countdown_rather_than_skipping_it() {
+        let mut app = App::new(song(), Theme::default(), true);
+
+        app.apply(Action::ToggleHelp, t(0));
+        app.apply(Action::ToggleHelp, t(0));
+
+        assert_eq!(app.mode, Mode::Countdown { step: 0 });
+    }
+
+    #[test]
+    fn help_opened_over_the_list_still_counts_as_browsing() {
+        let mut app = App::with_library(library(), Theme::default(), false).unwrap();
+        assert!(app.browsing().is_some());
+
+        app.apply(Action::ToggleHelp, t(0));
+        assert!(
+            app.browsing().is_some(),
+            "help floats over the list, it does not leave it"
+        );
+
+        app.apply(Action::ToggleHelp, t(0));
+        app.apply(Action::PickerSelect, t(0));
+        assert!(app.browsing().is_none());
+
+        app.apply(Action::ToggleHelp, t(0));
+        assert!(
+            app.browsing().is_none(),
+            "help over playback is not browsing"
+        );
+    }
+
+    #[test]
+    fn leaving_the_list_mid_countdown_and_coming_back_replays_it() {
+        let mut app = App::with_library(library(), Theme::default(), true).unwrap();
+        app.apply(Action::PickerSelect, t(0));
+        app.advance_countdown(t(1));
+        assert_eq!(app.mode, Mode::Countdown { step: 1 });
+
+        app.apply(Action::TogglePicker, t(2));
+        app.apply(Action::TogglePicker, t(3));
+
+        assert_eq!(
+            app.mode,
+            Mode::Countdown { step: 0 },
+            "the pre-roll the picker interrupted is re-armed, not dropped"
+        );
+        assert!(!app.clock.is_playing());
+    }
+
+    #[test]
+    fn leaving_the_list_mid_playback_does_not_replay_the_countdown() {
+        let mut app = App::with_library(library(), Theme::default(), true).unwrap();
+        app.apply(Action::PickerSelect, t(0));
+        for step in 0..4 {
+            app.advance_countdown(t(1 + step));
+        }
+        assert_eq!(app.mode, Mode::Playing);
+        assert!(app.clock.is_playing());
+
+        app.apply(Action::TogglePicker, t(10));
+        app.apply(Action::TogglePicker, t(11));
+
+        assert_eq!(
+            app.mode,
+            Mode::Playing,
+            "browsing mid-song must not restart the countdown over a running clock"
+        );
+        assert!(app.clock.is_playing());
+    }
+
+    #[test]
+    fn without_the_counter_flag_the_list_always_closes_into_playback() {
+        let mut app = App::with_library(library(), Theme::default(), false).unwrap();
+        app.apply(Action::PickerSelect, t(0));
+
+        app.apply(Action::TogglePicker, t(1));
+        app.apply(Action::TogglePicker, t(2));
+
+        assert_eq!(app.mode, Mode::Playing);
     }
 }

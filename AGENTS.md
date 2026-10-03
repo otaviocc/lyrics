@@ -52,7 +52,9 @@ src/
                 walk_audio_files (shared by scan and stats)
   stats.rs    : read-only coverage census (`lyrics stats`); never constructs an http::Client
   lrc.rs      : LRC parsing: lint checks (`lyrics lint`) and parse_synced, the timeline
-                `lyrics tui` plays; never constructs an http::Client
+                `lyrics tui` plays; also the directory -> .lrc discovery both `lint`
+                (resolve_lrc_paths, recursive) and `tui --folder` (synced_files, top
+                level only) walk with; never constructs an http::Client
   ebook/      : EPUB generation (`lyrics ebook`); never constructs an http::Client
     mod.rs      : orchestration (collect -> render -> write) and the run Summary
     library.rs  : directory tree -> book model (artists > albums > discs > tracks), reusing
@@ -80,6 +82,9 @@ src/
                   explicit Instant everywhere so it's deterministic under test
     app.rs      : App/Mode state and the Action -> state transitions
     input.rs    : KeyEvent -> Action
+    picker.rs   : `--folder`'s song list: the cursor over it and the overlay's geometry.
+                  Holds no I/O - lrc::synced_files finds the files, tui::songs_from_dir
+                  adapts them to Song
     view.rs     : the frame: header/rules/status chrome plus the centered lyric content
     bigtext.rs  : the --counter countdown's block-glyph digits
     help.rs     : the `?` key table overlay
@@ -108,7 +113,8 @@ provider is one match arm in `ProviderKind::spec()` in `provider.rs`. Talking to
 state a sidecar is already in, goes in `sidecar.rs`. The decision of what to do with a track
 goes in `runner.rs`. Building the book goes in `ebook/`. `stats`, `lint`, and `ebook` are
 read-only, offline commands: none of them should ever construct an `http::Client` or call a
-`sidecar::write_*` function; `tui --file` follows the same rule (it reads the `.lrc` directly).
+`sidecar::write_*` function; `tui --file` and `tui --folder` follow the same rule (they read
+`.lrc` files directly).
 `ebook` writes exactly one file, the book, at the path the user named — putting lyrics *in that
 file* is not a breach of invariant 3, which is about the standard streams; `tui` drawing lyrics
 on the alternate screen is the other named exception to that same invariant. A provider whose
