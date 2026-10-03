@@ -25,10 +25,11 @@ pub enum Element {
     FarLine,
     Countdown,
     HelpWindow,
+    PickerSelection,
 }
 
 impl Element {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Body,
         Self::Label,
         Self::HeaderTitle,
@@ -42,6 +43,7 @@ impl Element {
         Self::FarLine,
         Self::Countdown,
         Self::HelpWindow,
+        Self::PickerSelection,
     ];
 
     #[must_use]
@@ -69,6 +71,7 @@ impl Element {
             Self::FarLine => "far_line",
             Self::Countdown => "countdown",
             Self::HelpWindow => "help_window",
+            Self::PickerSelection => "picker_selection",
         }
     }
 
@@ -93,6 +96,9 @@ pub fn default_style(element: Element, palette: &Palette) -> Style {
             style.fg(palette.accent).add_modifier(Modifier::BOLD)
         }
         Element::HelpWindow => style.fg(palette.foreground).bg(palette.background),
+        Element::PickerSelection => style
+            .fg(palette.selection_foreground)
+            .bg(palette.selection_background),
     }
 }
 

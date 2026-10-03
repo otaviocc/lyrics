@@ -6,15 +6,16 @@
 use std::time::Duration;
 
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Rect, Size};
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Clear, Paragraph, Widget, Wrap};
 use ratatui::{Frame, symbols};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::theme::Element;
 use crate::tui::app::{App, Mode};
+use crate::tui::picker::{self, Picker};
 use crate::tui::{bigtext, help};
 
 const HINTS: &str = "? keys";
@@ -26,6 +27,7 @@ const ELIDED: &str = "…";
 const CONTENT_PAD: u16 = 2;
 const BREAK_GLYPH: &str = "♪";
 const SLACK_ROWS: usize = 4;
+const PICKER_HINTS: &str = "Enter play · Tab close";
 
 pub fn draw(frame: &mut Frame, app: &App, elapsed: Duration) {
     frame.render_widget(Screen { app, elapsed }, frame.area());
@@ -48,13 +50,23 @@ impl Widget for Screen<'_> {
         let [header_row, top_rule, content_rows, bottom_rule, status_row] =
             Layout::vertical(rows).areas(area);
 
-        let current_index = self.app.current_index(self.elapsed);
-        let break_remaining = self.app.break_remaining(self.elapsed);
+        let mut current_index = None;
 
         header(header_row, buf, self.app);
         rule(top_rule, buf, self.app.theme.style(Element::Hint));
-        progress(top_rule, buf, self.app, self.elapsed);
-        content(content_rows, buf, self.app, current_index, break_remaining);
+        if let Some(entries) = self.app.browsing() {
+            picker_overlay(content_rows, buf, self.app, entries);
+        } else {
+            current_index = self.app.current_index(self.elapsed);
+            progress(top_rule, buf, self.app, self.elapsed);
+            content(
+                content_rows,
+                buf,
+                self.app,
+                current_index,
+                self.app.break_remaining(self.elapsed),
+            );
+        }
         rule(bottom_rule, buf, self.app.theme.style(Element::Hint));
         statusbar(status_row, buf, self.app, self.elapsed, current_index);
 
@@ -81,6 +93,17 @@ fn row(area: Rect, buf: &mut Buffer, x: u16, text: &str, style: Style) {
     row_at(area, buf, x, area.y, text, style);
 }
 
+fn right_hint(area: Rect, buf: &mut Buffer, app: &App, used: usize, text: &str) {
+    let width = text.width();
+    if used.saturating_add(HINT_GAP).saturating_add(width) > usize::from(area.width) {
+        return;
+    }
+    let x = area
+        .right()
+        .saturating_sub(u16::try_from(width).unwrap_or(area.width));
+    row(area, buf, x, text, app.theme.style(Element::Hint));
+}
+
 fn padded(area: Rect) -> Rect {
     Rect {
         x: area.x.saturating_add(EDGE_PAD.min(area.width)),
@@ -95,15 +118,18 @@ fn header(area: Rect, buf: &mut Buffer, app: &App) {
     let quiet = app.theme.style(Element::Status);
 
     let mut segments = vec![String::from("lyrics")];
-    if let Some(artist) = &app.song.artist {
-        segments.push(artist.clone());
+    if let Some(entries) = app.browsing() {
+        segments.push(format!("{} synced", entries.len()));
+    } else {
+        if let Some(artist) = &app.song.artist {
+            segments.push(artist.clone());
+        }
+        segments.push(app.song.title.clone());
     }
-    segments.push(app.song.title.clone());
 
-    let hints_width = HINTS.width();
     let room = usize::from(area.width)
         .saturating_sub(HINT_GAP)
-        .saturating_sub(hints_width);
+        .saturating_sub(HINTS.width());
     let shown = elide(&segments, room);
 
     let mut x = area.x;
@@ -130,16 +156,7 @@ fn header(area: Rect, buf: &mut Buffer, app: &App) {
                 .width()
                 .saturating_mul(shown.len().saturating_sub(1)),
         );
-    if full_width
-        .saturating_add(HINT_GAP)
-        .saturating_add(hints_width)
-        <= usize::from(area.width)
-    {
-        let hint_x = area
-            .right()
-            .saturating_sub(u16::try_from(hints_width).unwrap_or(area.width));
-        row(area, buf, hint_x, HINTS, app.theme.style(Element::Hint));
-    }
+    right_hint(area, buf, app, full_width, HINTS);
 }
 
 fn elide(segments: &[String], room: usize) -> Vec<String> {
@@ -178,7 +195,7 @@ fn truncate(text: &str, width: usize) -> String {
     let mut out = String::new();
     let mut used = 0usize;
     for ch in text.chars() {
-        let w = ch.to_string().width();
+        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
         if used.saturating_add(w) > budget {
             break;
         }
@@ -263,7 +280,7 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
             current_width = word_width;
         } else {
             for ch in word.chars() {
-                let ch_width = ch.to_string().width();
+                let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
                 if current_width.saturating_add(ch_width) > width && !current.is_empty() {
                     rows.push(std::mem::take(&mut current));
                     current_width = 0;
@@ -454,6 +471,13 @@ fn statusbar(
     current_index: Option<usize>,
 ) {
     let area = padded(area);
+    if let Some(entries) = app.browsing() {
+        let text = format!("{}/{}", entries.selected().saturating_add(1), entries.len());
+        row(area, buf, area.x, &text, app.theme.style(Element::Status));
+        right_hint(area, buf, app, text.width(), PICKER_HINTS);
+        return;
+    }
+
     let text = if let Some(notice) = app.notice(std::time::Instant::now()) {
         row(
             area,
@@ -478,24 +502,7 @@ fn statusbar(
         text
     };
 
-    let hints_width = SYNC_HINTS.width();
-    if text
-        .width()
-        .saturating_add(HINT_GAP)
-        .saturating_add(hints_width)
-        <= usize::from(area.width)
-    {
-        let hint_x = area
-            .right()
-            .saturating_sub(u16::try_from(hints_width).unwrap_or(area.width));
-        row(
-            area,
-            buf,
-            hint_x,
-            SYNC_HINTS,
-            app.theme.style(Element::Hint),
-        );
-    }
+    right_hint(area, buf, app, text.width(), SYNC_HINTS);
 }
 
 fn format_remaining(left: Duration) -> String {
@@ -515,29 +522,66 @@ fn format_clock(elapsed: Duration) -> String {
     format!("{minutes:02}:{seconds:02}")
 }
 
-fn help_overlay(area: Rect, buf: &mut Buffer, app: &App) {
-    let size = ratatui::layout::Size::new(area.width, area.height);
-    let outer = help::outer(size);
-    if outer.width == 0 || outer.height == 0 {
-        return;
+fn overlay_frame(area: Rect, buf: &mut Buffer, app: &App, size: Size, title: &str) -> Rect {
+    if size.width == 0 || size.height == 0 {
+        return Rect::ZERO;
     }
     let x = area
         .x
-        .saturating_add(area.width.saturating_sub(outer.width).saturating_div(2));
+        .saturating_add(area.width.saturating_sub(size.width).saturating_div(2));
     let y = area
         .y
-        .saturating_add(area.height.saturating_sub(outer.height).saturating_div(2));
-    let overlay_area = Rect::new(x, y, outer.width, outer.height);
+        .saturating_add(area.height.saturating_sub(size.height).saturating_div(2));
+    let outer = Rect::new(x, y, size.width, size.height);
 
-    Clear.render(overlay_area, buf);
+    Clear.render(outer, buf);
     let block = Block::bordered()
-        .title(help::TITLE)
+        .title(title)
         .style(app.theme.style(Element::HelpWindow))
         .border_style(app.theme.style(Element::HeaderTitle));
-    let inner = block.inner(overlay_area);
-    block.render(overlay_area, buf);
+    let inner = block.inner(outer);
+    block.render(outer, buf);
+    inner
+}
 
+fn picker_overlay(area: Rect, buf: &mut Buffer, app: &App, entries: &Picker) {
+    let size = picker::outer(area.as_size(), entries.len());
+    let inner = overlay_frame(area, buf, app, size, picker::TITLE);
+    if inner.is_empty() {
+        return;
+    }
+
+    let window = entries.window(usize::from(inner.height));
+    let selected = entries.selected();
+    let body = app.theme.style(Element::Body);
+    let highlight = app.theme.style(Element::PickerSelection);
+    for (offset, index) in window.enumerate() {
+        let Some(label) = entries.label(index) else {
+            continue;
+        };
+        let Ok(offset) = u16::try_from(offset) else {
+            break;
+        };
+        let row_y = inner.y.saturating_add(offset);
+        let style = if index == selected { highlight } else { body };
+        let width = usize::from(inner.width);
+        let mut text = truncate(&label, width);
+        if index == selected {
+            let pad = width.saturating_sub(text.width());
+            text.push_str(&" ".repeat(pad));
+        }
+        row_at(inner, buf, inner.x, row_y, &text, style);
+    }
+}
+
+fn help_overlay(area: Rect, buf: &mut Buffer, app: &App) {
     let lines = help::lines(&app.theme);
+    let size = help::outer(area.as_size(), &lines);
+    let inner = overlay_frame(area, buf, app, size, help::TITLE);
+    if inner.is_empty() {
+        return;
+    }
+
     Paragraph::new(lines)
         .wrap(Wrap { trim: false })
         .render(inner, buf);
@@ -809,5 +853,196 @@ mod tests {
         terminal
             .draw(|frame| draw(frame, &app, Duration::ZERO))
             .unwrap();
+    }
+
+    fn library_app() -> App {
+        let songs = vec![
+            Song {
+                title: String::from("Blackened"),
+                artist: Some(String::from("Metallica")),
+                lines: vec![SyncedLine {
+                    at_ms: 0,
+                    text: String::from("Blackened line"),
+                }],
+            },
+            Song {
+                title: String::from("Harvester of Sorrow"),
+                artist: None,
+                lines: vec![SyncedLine {
+                    at_ms: 0,
+                    text: String::from("Harvester line"),
+                }],
+            },
+        ];
+        App::with_library(songs, Theme::default(), false).unwrap()
+    }
+
+    #[test]
+    fn the_list_shows_every_song_and_hides_the_lyrics_behind_it() {
+        let backend = TestBackend::new(60, 14);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = library_app();
+        terminal
+            .draw(|frame| draw(frame, &app, Duration::ZERO))
+            .unwrap();
+
+        let screen: String = (0..14)
+            .map(|y| row_text(terminal.backend().buffer(), y))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(screen.contains("Metallica — Blackened"), "{screen}");
+        assert!(screen.contains("Harvester of Sorrow"), "{screen}");
+        assert!(
+            !screen.contains("Blackened line"),
+            "the selected song's lyrics must not sit behind the list\n{screen}"
+        );
+    }
+
+    #[test]
+    fn the_selected_row_carries_the_selection_style_across_the_full_width() {
+        let backend = TestBackend::new(60, 14);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = library_app();
+        terminal
+            .draw(|frame| draw(frame, &app, Duration::ZERO))
+            .unwrap();
+
+        let highlight = app.theme.style(Element::PickerSelection);
+        let background = highlight
+            .bg
+            .expect("the default palette sets a selection colour");
+        let buffer = terminal.backend().buffer();
+        let selected_row = (0..14)
+            .find(|y| row_text(buffer, *y).contains("Metallica — Blackened"))
+            .expect("the first song is drawn");
+        let styled = (0..60)
+            .filter(|x| {
+                buffer
+                    .cell((*x, selected_row))
+                    .is_some_and(|cell| cell.bg == background)
+            })
+            .count();
+        assert!(styled > 20, "the selection bar only covered {styled} cells");
+
+        let other_row = (0..14)
+            .find(|y| row_text(buffer, *y).contains("Harvester"))
+            .expect("the second song is drawn");
+        assert!(
+            (0..60).all(|x| {
+                buffer
+                    .cell((x, other_row))
+                    .is_some_and(|cell| cell.bg != background)
+            }),
+            "the unselected row must not be highlighted"
+        );
+
+        app.apply(
+            crate::tui::input::Action::PickerDown,
+            std::time::Instant::now(),
+        );
+        terminal
+            .draw(|frame| draw(frame, &app, Duration::ZERO))
+            .unwrap();
+        let moved = (0..14)
+            .find(|y| row_text(terminal.backend().buffer(), *y).contains("Harvester"))
+            .expect("the second song is drawn");
+        assert_ne!(moved, selected_row);
+    }
+
+    #[test]
+    fn the_status_bar_counts_songs_instead_of_lyric_lines_in_the_list() {
+        let backend = TestBackend::new(60, 14);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = library_app();
+        terminal
+            .draw(|frame| draw(frame, &app, Duration::ZERO))
+            .unwrap();
+
+        let status = row_text(terminal.backend().buffer(), 13);
+        assert!(status.contains("1/2"), "{status}");
+        assert!(!status.contains("line "), "{status}");
+    }
+
+    #[test]
+    fn picker_overlay_does_not_panic_on_a_tiny_screen() {
+        let backend = TestBackend::new(3, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = library_app();
+        terminal
+            .draw(|frame| draw(frame, &app, Duration::ZERO))
+            .unwrap();
+    }
+
+    #[test]
+    fn help_over_the_list_keeps_the_lists_chrome_and_not_playbacks() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = library_app();
+        app.apply(
+            crate::tui::input::Action::ToggleHelp,
+            std::time::Instant::now(),
+        );
+        terminal
+            .draw(|frame| draw(frame, &app, Duration::ZERO))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let header = row_text(buffer, 0);
+        let status = row_text(buffer, 19);
+
+        assert!(header.contains("2 synced"), "{header}");
+        assert!(!header.contains("Blackened"), "{header}");
+        assert!(status.contains("1/2"), "{status}");
+        assert!(!status.contains("line "), "{status}");
+    }
+
+    #[test]
+    fn a_small_screen_still_shows_how_to_leave() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = app();
+        app.mode = Mode::Help;
+        terminal
+            .draw(|frame| draw(frame, &app, Duration::ZERO))
+            .unwrap();
+
+        let screen: String = (0..24)
+            .map(|y| row_text(terminal.backend().buffer(), y))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(screen.contains("Leaving"), "{screen}");
+        assert!(screen.contains("Ctrl-c"), "{screen}");
+        assert!(
+            screen.contains("quit"),
+            "the overlay must never clip away how to close it\n{screen}"
+        );
+    }
+
+    #[test]
+    fn a_tall_screen_draws_every_help_row_including_the_last() {
+        let backend = TestBackend::new(90, 44);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = app();
+        app.mode = Mode::Help;
+        terminal
+            .draw(|frame| draw(frame, &app, Duration::ZERO))
+            .unwrap();
+
+        let screen: String = (0..44)
+            .map(|y| row_text(terminal.backend().buffer(), y))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        for (_, keys) in help::SECTIONS {
+            for (key, meaning) in *keys {
+                assert!(screen.contains(key), "{key} is clipped out of the overlay");
+                assert!(
+                    screen.contains(meaning) || meaning.split(' ').all(|w| screen.contains(w)),
+                    "{meaning} is clipped out of the overlay"
+                );
+            }
+        }
     }
 }

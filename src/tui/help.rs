@@ -7,15 +7,17 @@ use ratatui::layout::Size;
 use ratatui::text::{Line, Span};
 
 use crate::theme::{Element, Theme};
+use crate::tui::clamp_fraction;
 
 pub const TITLE: &str = " Keys ";
 const WIDTH_FRACTION: u16 = 60;
 const MIN_WIDTH: u16 = 40;
 const MAX_WIDTH: u16 = 64;
-const HEIGHT_FRACTION: u16 = 70;
+const HEIGHT_FRACTION: u16 = 85;
 const MIN_HEIGHT: u16 = 10;
-const MAX_HEIGHT: u16 = 22;
+const MAX_HEIGHT: u16 = 30;
 const KEYS_COLUMN: usize = 18;
+const BORDER_ROWS: u16 = 2;
 
 pub const SECTIONS: &[(&str, &[(&str, &str)])] = &[
     (
@@ -24,6 +26,21 @@ pub const SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("Space", "play · pause"),
             ("c", "replay the countdown"),
             ("0 r", "restart at 00:00, paused"),
+        ],
+    ),
+    (
+        "Library",
+        &[
+            ("Tab", "open · close the list"),
+            ("Up k Down j", "move the cursor"),
+            ("Enter", "follow this song"),
+        ],
+    ),
+    (
+        "Leaving",
+        &[
+            ("? Esc q", "Esc or q closes this window"),
+            ("Ctrl-c", "quit"),
         ],
     ),
     (
@@ -40,30 +57,28 @@ pub const SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("Enter", "start this line (paused) · snap (playing)"),
         ],
     ),
-    (
-        "Leaving",
-        &[
-            ("? Esc q", "these keys · Esc or q closes this window"),
-            ("Ctrl-c", "quit"),
-        ],
-    ),
 ];
 
 #[must_use]
-pub fn outer(area: Size) -> Size {
-    let width = area
-        .width
-        .saturating_mul(WIDTH_FRACTION)
-        .saturating_div(100)
-        .clamp(MIN_WIDTH, MAX_WIDTH)
-        .min(area.width);
-    let height = area
-        .height
-        .saturating_mul(HEIGHT_FRACTION)
-        .saturating_div(100)
-        .clamp(MIN_HEIGHT, MAX_HEIGHT)
-        .min(area.height);
-    Size::new(width, height)
+pub fn outer(area: Size, lines: &[Line<'_>]) -> Size {
+    let width = clamp_fraction(area.width, WIDTH_FRACTION, MIN_WIDTH, MAX_WIDTH);
+    let ceiling = clamp_fraction(area.height, HEIGHT_FRACTION, MIN_HEIGHT, MAX_HEIGHT);
+    let inner = usize::from(width.saturating_sub(BORDER_ROWS)).max(1);
+    let rows = lines
+        .iter()
+        .map(|line| {
+            line.width()
+                .saturating_add(inner)
+                .saturating_sub(1)
+                .checked_div(inner)
+                .unwrap_or(1)
+                .max(1)
+        })
+        .fold(0usize, usize::saturating_add);
+    let wanted = u16::try_from(rows)
+        .unwrap_or(u16::MAX)
+        .saturating_add(BORDER_ROWS);
+    Size::new(width, wanted.max(MIN_HEIGHT).min(ceiling))
 }
 
 #[must_use]
@@ -100,18 +115,28 @@ mod tests {
         for width in 1..200u16 {
             for height in 1..40u16 {
                 let area = Size::new(width, height);
-                assert!(outer(area).width <= width, "{area:?}");
-                assert!(outer(area).height <= height, "{area:?}");
+                let table = lines(&Theme::default());
+                for rows in [&table[..], &[][..]] {
+                    assert!(outer(area, rows).width <= width, "{area:?}");
+                    assert!(outer(area, rows).height <= height, "{area:?}");
+                }
             }
         }
     }
 
     #[test]
-    fn a_tall_enough_screen_shows_every_row_without_clipping() {
-        let rows = u16::try_from(lines(&Theme::default()).len()).unwrap();
+    fn the_box_counts_wrapped_rows_not_just_table_entries() {
+        let table = lines(&Theme::default());
+        let roomy = outer(Size::new(200, 200), &table);
+        let narrow = outer(Size::new(MIN_WIDTH, 200), &table);
+
         assert!(
-            rows.saturating_add(2) <= MAX_HEIGHT,
-            "{rows} rows no longer fit MAX_HEIGHT"
+            roomy.height <= MAX_HEIGHT,
+            "the table no longer fits MAX_HEIGHT at its widest"
+        );
+        assert!(
+            narrow.height > roomy.height,
+            "a narrower box wraps more rows and must be taller"
         );
     }
 
@@ -134,6 +159,7 @@ mod tests {
         match token {
             "Space" => KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
             "Esc" => KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            "Tab" => KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
             "Enter" => KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
             "Left" => KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
             "Right" => KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),

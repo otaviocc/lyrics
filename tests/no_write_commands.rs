@@ -158,6 +158,34 @@ fn tui_list_themes_and_file_lookup_never_write() {
 
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 #[test]
+fn collecting_a_folders_synced_lyrics_never_writes() {
+    let tmp = tempfile::tempdir().unwrap();
+    build_fixture_tree(tmp.path());
+    let before = snapshot(tmp.path());
+    let before_entry_count = before.len();
+
+    let found = lrc::synced_files(tmp.path()).expect("the fixture directory is readable");
+    let names: Vec<String> = found
+        .iter()
+        .map(|(path, _)| path.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["01 Synced.lrc", "04 Orphan.lrc", "05 Broken.lrc"],
+        "every top-level .lrc with timed lines, and nothing else"
+    );
+
+    let after = snapshot(tmp.path());
+    assert_eq!(before, after, "no file's length or mtime changed");
+    assert_eq!(
+        after.len(),
+        before_entry_count,
+        "no file was created or deleted in the music tree"
+    );
+}
+
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+#[test]
 fn ebook_reports_an_error_when_there_is_nothing_to_put_in_a_book() {
     let music = tempfile::tempdir().unwrap();
     let out_dir = tempfile::tempdir().unwrap();
